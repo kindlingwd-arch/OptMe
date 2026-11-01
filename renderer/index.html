@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' file: data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src file: data: blob:; img-src file: data: blob:; frame-src file:">
+<title>影游剪辑台</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 欢迎页 -->
+<section id="welcome" class="welcome">
+  <div class="wbox">
+    <div class="logo"><span class="mark"></span><div><h1>影游剪辑台</h1><p>先做故事板，再做视频 · 剧本就是剪辑表 · 画面、配音、选择都在一条时间线上</p></div></div>
+    <div class="wact"><button class="pri big" id="wOpen">打开项目文件夹</button><span class="hint">选择有 <code>index.html</code> 的游戏文件夹</span></div>
+    <h3>最近的项目</h3>
+    <div id="wRecent" class="recent"><div class="hint">还没有打开过项目</div></div>
+  </div>
+</section>
+
+<!-- 主界面 -->
+<section id="studio" class="studio" hidden>
+  <header class="topbar">
+    <div class="tb-left"><span class="mark sm"></span><b id="projName">—</b><span id="dirtyDot" class="dirty" hidden>● 未保存</span>
+      <div class="modes" role="tablist" title="故事板模式：一句一张图，先把剧情和画面定下来；视频模式：给定稿的画面做视频、剪辑和原声"><button data-mode="board" aria-selected="true">故事板</button><button data-mode="video" aria-selected="false">视频</button></div></div>
+    <div class="tb-mid" id="tbStat"></div>
+    <div class="tb-right">
+      <button id="tbReview" class="ghost" title="一张张往下刷，审阅分镜图（Ctrl+Shift+A）">审阅 <span id="reviewN" class="badge" hidden>0</span></button>
+      <button id="tbCheck" class="ghost">素材检查 <span id="issueN" class="badge" hidden>0</span></button>
+      <button id="tbEdl" class="ghost">导出剪辑表</button>
+      <button id="tbSave" class="ghost" disabled>保存</button>
+      <button id="tbExport" class="pri">导出游戏</button>
+    </div>
+  </header>
+
+  <div class="work">
+    <!-- 素材面板 -->
+    <aside class="panel lib">
+      <nav class="libtabs" role="tablist">
+        <button data-lt="scenes" aria-selected="true"><i class="ic ic-scene"></i>场景</button>
+        <button data-lt="media" aria-selected="false"><i class="ic ic-media"></i>媒体</button>
+        <button data-lt="audio" aria-selected="false"><i class="ic ic-audio"></i>音频</button>
+        <button data-lt="clues" aria-selected="false"><i class="ic ic-clue"></i>线索</button>
+        <button data-lt="graph" aria-selected="false"><i class="ic ic-graph"></i>故事图</button>
+      </nav>
+      <div class="libbar" id="libBar"></div>
+      <div class="libbody" id="libBody"></div>
+    </aside>
+
+    <!-- 播放器 -->
+    <section class="panel player">
+      <div class="phead"><div class="ctabs"><button data-ct="board" aria-selected="true">故事板</button><button data-ct="play" aria-selected="false">预览</button></div><span id="pvWhere" class="dim"></span></div>
+      <div class="board" id="board"></div>
+      <div class="pstage" id="pStage"><div class="pframe" id="pFrame"><iframe id="pv" title="预览" src="about:blank"></iframe></div></div>
+      <div class="pctl" id="pCtl">
+        <span class="tc" id="tc">00:00 / 00:00</span>
+        <div class="pbtns">
+          <button class="icon" id="pRestart" title="从本场开头播放">⟲</button>
+          <button class="icon" id="pPrevLine" title="上一句">⏮</button>
+          <button class="icon play" id="pPlay" title="暂停 / 继续（空格）">❚❚</button>
+          <button class="icon" id="pNextLine" title="下一句">⏭</button>
+        </div>
+        <label class="chk"><input type="checkbox" id="allClues" checked> 带上之前能拿到的线索</label>
+      </div>
+    </section>
+
+    <!-- 属性面板 -->
+    <aside class="panel props" id="props"></aside>
+  </div>
+
+  <!-- 时间线 -->
+  <section class="timeline">
+    <div class="ttool">
+      <button class="icon" id="tUndo" title="撤销 Ctrl+Z">↶</button>
+      <button class="icon" id="tRedo" title="重做 Ctrl+Shift+Z">↷</button>
+      <span class="sep"></span>
+      <button class="tbtn" id="tAddLine" title="在选中位置后面加一句台词">＋ 台词</button>
+      <button class="tbtn" id="tAddShot" title="加一个插入镜头">＋ 镜头</button>
+      <button class="tbtn" id="tAddCap" title="加一张字幕卡">＋ 字幕卡</button>
+      <button class="tbtn" id="tDel" title="删除选中的一行 Delete">删除</button>
+      <span class="sep"></span>
+      <div class="scenenav">
+        <button class="icon" id="tPrevScene" title="上一场">‹</button>
+        <span id="sceneCrumb" class="crumb"></span>
+        <button class="icon" id="tNextScene" title="下一场">›</button>
+        <span id="sceneOuts" class="outs"></span>
+      </div>
+      <span class="grow"></span>
+      <span class="dim" id="tDur"></span>
+      <span class="zoomw"><span class="dim">−</span><input type="range" id="zoom" min="10" max="140" value="44"><span class="dim">＋</span></span>
+    </div>
+    <div class="tbody" id="tBody">
+      <div class="theads" id="tHeads"></div>
+      <div class="tracks" id="tracks"></div>
+    </div>
+  </section>
+</section>
+
+<div id="taskbar" class="taskbar" hidden>
+  <div class="tk-h"><span class="spin" id="taskSpin"></span><b id="taskTitle">出图任务</b><span class="grow"></span><button class="ghost" id="taskStop">停止</button><button class="icon" id="taskHide" title="收起">✕</button></div>
+  <pre id="taskLog"></pre>
+</div>
+<div id="toasts" class="toasts"></div>
+<script src="app.js"></script>
+</body>
+</html>

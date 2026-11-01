@@ -1,0 +1,4 @@
+Pillow>=10
+numpy>=1.24
+# 可选：独立网页版把 SVG 转 PNG 用
+cairosvg>=2.7
