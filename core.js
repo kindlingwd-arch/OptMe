@@ -40,17 +40,50 @@ function jsObj(txt) {
 }
 const toJsObj = d => "{" + Object.entries(d).map(([k, v]) => `${k}:${JSON.stringify(v)}`).join(",") + "}";
 
+// Read only MP4 headers; the media payload may be much larger than the index.
+function mp4HasAudio(file, size) {
+  let fd;
+  try {
+    fd = fs.openSync(file, "r");
+    const header = Buffer.alloc(16);
+    function scan(start, end, containers) {
+      for (let offset = start; offset + 8 <= end;) {
+        if (fs.readSync(fd, header, 0, 8, offset) !== 8) return false;
+        let length = header.readUInt32BE(0), head = 8;
+        const type = header.toString("ascii", 4, 8);
+        if (length === 1) {
+          if (fs.readSync(fd, header, 8, 8, offset + 8) !== 8) return false;
+          length = Number(header.readBigUInt64BE(8)); head = 16;
+        } else if (length === 0) length = end - offset;
+        if (length < head || length > end - offset) return false;
+        const body = offset + head;
+        if (containers.length && type === containers[0] && scan(body, offset + length, containers.slice(1))) return true;
+        if (!containers.length && type === "hdlr" && length >= head + 12 &&
+            fs.readSync(fd, header, 0, 12, body) === 12 && header.toString("ascii", 8, 12) === "soun") return true;
+        offset += length;
+      }
+      return false;
+    }
+    return scan(0, size, ["moov", "trak", "mdia"]);
+  } catch { return false; }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
+}
+
 function listFiles(dir) {
   const files = {};
-  const walk = (rel) => {
+  const walk = (rel, onlyVideo = false) => {
     const abs = path.join(dir, rel);
     if (!fs.existsSync(abs)) return;
     for (const f of fs.readdirSync(abs)) {
       const r = rel + "/" + f, st = fs.statSync(path.join(dir, r));
-      if (st.isDirectory()) walk(r); else files[r] = { size: st.size, mtime: Math.floor(st.mtimeMs / 1000) };
+      if (st.isDirectory()) { if (!onlyVideo) walk(r); }
+      else if (!onlyVideo || /^\d{8}-\d{6}__vid__.+\.mp4$/i.test(f)) {
+        const info = files[r] = { size: st.size, mtime: Math.floor(st.mtimeMs / 1000), revision: `${st.mtimeMs}:${st.ctimeMs}:${st.size}` };
+        if (r.startsWith("vid/") && /\.mp4$/i.test(f)) info.hasAudio = mp4HasAudio(path.join(dir, r), st.size);
+      }
     }
   };
-  MEDIA_DIRS.forEach(walk); walk(STUDIO_DIR + "/inbox");
+  MEDIA_DIRS.forEach(rel => walk(rel)); walk(STUDIO_DIR + "/inbox"); walk(STUDIO_DIR + "/backup", true); walk("vid_draft");   // 草稿视频（draft_video.py 出的）：预览要用，导出游戏不带
   return files;
 }
 
@@ -68,7 +101,7 @@ function loadProject(dir) {
   const tm = s.match(/<title>([^<]*)<\/title>/) || s.match(/<h1>([^<]*)<\/h1>/);
   let STALE = [];
   try { STALE = JSON.parse(fs.readFileSync(path.join(dir, STUDIO_DIR, "state.json"), "utf8")).stale || []; } catch {}
-  return { dir, name: tm ? tm[1].trim() : path.basename(dir), N, VOT, SHOTS, LIMG, hasLimg: s.includes("const LIMG=new Set(/*LIMG*/"), sb: sbLoad(dir), refs: refsLoad(dir), TRIM, VAUD, hasClip: s.includes("const TRIM=/*TRIM*/"), BGM, AMB, SHOT_SFX, CLUES, ACTS, STALE, files: listFiles(dir) };
+  return { dir, name: tm ? tm[1].trim() : path.basename(dir), N, VOT, SHOTS, LIMG, hasLimg: s.includes("const LIMG=new Set(/*LIMG*/"), sb: sbLoad(dir), refs: refsLoad(dir), voiceRefs: require("./voice-refs-store").load(dir), vs: vsLoad(dir), TRIM, VAUD, hasClip: s.includes("const TRIM=/*TRIM*/"), BGM, AMB, SHOT_SFX, CLUES, ACTS, STALE, files: listFiles(dir) };
 }
 
 /* ---- 参考图登记表（moban_art\refs\refs.json）：名称、类型、生成描述、关键词（提示词里出现这些词时应该附上它） ---- */
@@ -125,15 +158,81 @@ function sbLoad(dir) {
   const refs = fs.existsSync(refDir) ? fs.readdirSync(refDir).filter(x => /\.(png|jpe?g)$/i.test(x)).map(x => "refs/" + x) : [];
   let review = {};
   try { review = JSON.parse(fs.readFileSync(path.join(d, "out", "review.json"), "utf8")); } catch {}
-  return { dir: d, bible: list.bible || {}, shots: list.shots || [], state, refs, review };
+  let cont = {};   // 前后镜头衔接检查结果（continuity.py 写）
+  try { cont = JSON.parse(fs.readFileSync(path.join(d, "out", "continuity.json"), "utf8")); } catch {}
+  return { dir: d, bible: list.bible || {}, shots: list.shots || [], state, refs, review, cont };
+}
+/* ---- 视频分镜表（moban_art\autofix\video_shots.json）：提示词、质检标准、首帧、参考图、生成方式；autofix.py 和 qc.py 也读它 ---- */
+function afDir(dir) { return path.join(dir, "..", "autofix"); }
+function vsLoad(dir) {
+  const f = path.join(afDir(dir), "video_shots.json"); if (!fs.existsSync(f)) return null;
+  let d; try { d = JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { return { error: "视频分镜表读不了：" + e.message }; }
+  const state = {};
+  for (const sub of ["out", "out_r3"]) {      // 自动重拍的记录（AUTOFIX_OUT 不同，记录在不同文件夹）
+    try { const st = JSON.parse(fs.readFileSync(path.join(afDir(dir), sub, "state.json"), "utf8")); for (const [k, v] of Object.entries(st.shots || {})) if (!state[k] || (v.tries || []).length) state[k] = { ...v, dir: sub }; } catch {}
+  }
+  const mt = p => { try { return Math.floor(fs.statSync(p).mtimeMs / 1000); } catch { return 0; } };
+  const root = path.join(dir, "..");
+  (d.shots || []).forEach(s => {
+    s._keyRel = s.key ? "../autofix/" + s.key : (s.keyframe || ""); s._keym = mt(path.join(dir, s._keyRel)); try { const st=fs.statSync(path.join(dir,s._keyRel)); s._keyrev=`${st.mtimeMs}:${st.ctimeMs}:${st.size}`; } catch { s._keyrev=""; }
+    s._lastRel = s.last ? "../autofix/" + s.last : ""; s._midRel = s.mid ? "../autofix/" + s.mid : "";
+    s._refs = (s.refs || []).map(r => { const p = Array.isArray(r) ? r[0] : r; return { rel: "../" + p, label: Array.isArray(r) ? r[1] : path.basename(p, path.extname(p)), ok: fs.existsSync(path.join(root, p)) }; });
+    s._gen = (s.gen_refs || []).map(g => ({ rel: "../autofix/refs_gen/" + g.name + ".png", label: g.label || g.name, ok: fs.existsSync(path.join(afDir(dir), "refs_gen", g.name + ".png")) }));
+  });
+  let draft = null; try { draft = JSON.parse(fs.readFileSync(path.join(afDir(dir), "out", "vprompts_draft.json"), "utf8")); } catch {}   // AI 写的提示词草稿（还没采用）
+  let drafts = {}; try { drafts = JSON.parse(fs.readFileSync(path.join(afDir(dir), "draft", "drafts.json"), "utf8")); } catch {}   // 草稿视频的记录（代码草稿 / AI 尾帧 / 本地模型）
+  return { suffix: d.suffix || "", shots: d.shots || [], state, draft, drafts };
+}
+function vsSave(dir, id, patch) {               // 改一条：先备份整个文件到 autofix\backup\
+  const f = path.join(afDir(dir), "video_shots.json"), d = JSON.parse(fs.readFileSync(f, "utf8"));
+  const s = (d.shots || []).find(x => x.id === id); if (!s) throw new Error("视频分镜表里没有 " + id);
+  const b = path.join(afDir(dir), "backup"); fs.mkdirSync(b, { recursive: true }); fs.copyFileSync(f, path.join(b, `video_shots_${stamp()}.json`));
+  for (const [k, v] of Object.entries(patch || {})) if (!k.startsWith("_") && k !== "id") s[k] = v;
+  fs.writeFileSync(f, JSON.stringify(d, null, 1), "utf8"); return vsLoad(dir);
+}
+function vsAdd(dir, list) {                     // 剧本里有、视频分镜表里还没有的场景 / 动作镜头：补占位条目（已有的 id 不动）
+  const f = path.join(afDir(dir), "video_shots.json"), d = JSON.parse(fs.readFileSync(f, "utf8"));
+  const have = new Set((d.shots || []).map(x => x.id)), add = (list || []).filter(x => x && x.id && /^[\w-]+$/.test(x.id) && !have.has(x.id));
+  if (!add.length) return vsLoad(dir);
+  const b = path.join(afDir(dir), "backup"); fs.mkdirSync(b, { recursive: true }); fs.copyFileSync(f, path.join(b, `video_shots_${stamp()}.json`));
+  d.shots = [...(d.shots || []), ...add.map(x => { const o = {}; for (const [k, v] of Object.entries(x)) if (!k.startsWith("_")) o[k] = v; return o; })];
+  fs.writeFileSync(f, JSON.stringify(d, null, 1), "utf8"); return vsLoad(dir);
+}
+function vsDel(dir, id) {                       // 删一条（剧本里已经没有的）：先备份
+  const f = path.join(afDir(dir), "video_shots.json"), d = JSON.parse(fs.readFileSync(f, "utf8"));
+  const i = (d.shots || []).findIndex(x => x.id === id); if (i < 0) throw new Error("视频分镜表里没有 " + id);
+  const b = path.join(afDir(dir), "backup"); fs.mkdirSync(b, { recursive: true }); fs.copyFileSync(f, path.join(b, `video_shots_${stamp()}.json`));
+  d.shots.splice(i, 1); fs.writeFileSync(f, JSON.stringify(d, null, 1), "utf8"); return vsLoad(dir);
+}
+/* ---- 手绘构图：只能读写 storyboard\sketch 里的文件；rel 相对 moban_art（例如 storyboard/sketch/stop_00.png） ---- */
+function sketchPath(dir, rel) {
+  const root = path.resolve(sbDir(dir), "sketch"), p = path.resolve(sbDir(dir), "..", String(rel || ""));
+  if (p !== root && !p.startsWith(root + path.sep)) throw new Error("只能读写 storyboard\\sketch 里的文件");
+  return p;
+}
+function sketchWrite(dir, rel, data, isB64) {   // 正式的构图图被覆盖前，先备份到 sketch\_old\
+  const p = sketchPath(dir, rel); fs.mkdirSync(path.dirname(p), { recursive: true });
+  if (fs.existsSync(p) && !/[\\/]_draft[\\/]/.test(p)) { const o = path.join(path.resolve(sbDir(dir), "sketch"), "_old"); fs.mkdirSync(o, { recursive: true }); fs.copyFileSync(p, path.join(o, path.basename(p).replace(/(\.\w+)$/, `_${stamp()}$1`))); }
+  if (isB64) fs.writeFileSync(p, Buffer.from(data, "base64")); else fs.writeFileSync(p, data, "utf8");
+  return rel;
+}
+function sketchRead(dir, rel) { const p = sketchPath(dir, rel); return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null; }
+/* 一次写好几条（比如「上游基准」：下游确认时上游是什么样，用来提示「上游改过、要复查」）。entries = {key: 值或 null（删除）} */
+function sbReviewMany(dir, entries) {
+  const f = path.join(sbDir(dir), "out", "review.json");
+  let r = {}; try { r = JSON.parse(fs.readFileSync(f, "utf8")); } catch {}
+  for (const [k, v] of Object.entries(entries || {})) { if (v === null) delete r[k]; else r[k] = v; }
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify(r, null, 1), "utf8");
+  return sbLoad(dir);
 }
 /* 人工审阅结果单独存在 storyboard\out\review.json（不和出图脚本抢着写 state.json）。
    每条记下审阅时游戏里那张图的修改时间，图换了就自动回到「待审」。 */
-function sbReview(dir, sid, ok, note, mtime) {
+function sbReview(dir, sid, ok, note, mtime, extra) {
   const f = path.join(sbDir(dir), "out", "review.json");
   let r = {}; try { r = JSON.parse(fs.readFileSync(f, "utf8")); } catch {}
   if (ok === null) delete r[sid];
-  else r[sid] = { ok: !!ok, note: note || "", mtime: mtime || 0, at: new Date().toISOString() };
+  else r[sid] = { ok: !!ok, note: note || "", mtime: mtime || 0, at: new Date().toISOString(), ...(extra || {}) };
   fs.mkdirSync(path.dirname(f), { recursive: true });
   fs.writeFileSync(f, JSON.stringify(r, null, 1), "utf8");
   return sbLoad(dir);
@@ -175,6 +274,8 @@ function saveProject(dir, data) {
   }
   for (const k of ["BGM", "AMB"]) if (data[k]) { const sp = spanLine(s, `const ${k}=`); if (sp) put(sp, toJsObj(data[k])); }
   if (data.CLUES) put(spanClues(s), "{\n" + Object.entries(data.CLUES).map(([k, v]) => ` ${k}:${JSON.stringify(v)}`).join(",\n") + "\n}");
+  s = s.replace('va.volume=Math.min(1,a.vol??1)', 'va.volume=a.muted?0:Math.min(1,a.vol??1)')
+    .replaceAll('a.volume=1;', 'a.volume=(N[G.node]?.lines[G.line]?.[2]?.mute)?0:1;');
   fs.writeFileSync(gameFile(dir), s, "utf8");
   if (data.STALE) { fs.mkdirSync(path.join(dir, STUDIO_DIR), { recursive: true }); fs.writeFileSync(path.join(dir, STUDIO_DIR, "state.json"), JSON.stringify({ stale: data.STALE })); }
   return bk;
@@ -251,4 +352,4 @@ function exportGame(dir, name) {
   writeZip(out, entries); return out;
 }
 
-module.exports = { MEDIA_DIRS, STUDIO_DIR, isProject, loadProject, saveProject, replaceAsset, writeAsset, readAsset, importFiles, exportGame, listFiles, sbDir, sbLoad, sbSaveShot, sbReview, refPath, refsLoad, refsSave, refsImport };
+module.exports = { MEDIA_DIRS, STUDIO_DIR, isProject, loadProject, saveProject, replaceAsset, writeAsset, readAsset, importFiles, exportGame, listFiles, sbDir, sbLoad, sbSaveShot, sbReview, sbReviewMany, sketchWrite, sketchRead, vsLoad, vsSave, vsAdd, vsDel, refPath, refsLoad, refsSave, refsImport };
