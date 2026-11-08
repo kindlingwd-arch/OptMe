@@ -7,6 +7,16 @@ import os, sys, json, time, base64, html, argparse, urllib.request, urllib.error
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
 G = "https://generativelanguage.googleapis.com/v1beta"
 
+# 代理修正（2026-11-01）：Windows 系统代理的「不走代理名单」里有 127.* / 10.* / 172.16~31.* 等地址段，
+# Python 判断要不要走代理时会先查 DNS，DNS 一旦把 Google 解析到这些段里（被污染或代理软件的 DNS 设置），
+# 就误判成「直连」，直接连 Google 被拒（WinError 10061）。把系统代理显式写进环境变量，Python 就只看这里、不再查 DNS。
+if not any(os.environ.get(k) for k in ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy")):
+    _px = urllib.request.getproxies()
+    if _px.get("https") or _px.get("http"):
+        os.environ["HTTPS_PROXY"] = _px.get("https") or _px["http"]
+        os.environ.setdefault("HTTP_PROXY", _px.get("http") or _px["https"])
+        os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1")
+
 def http(url, body=None, headers=None, timeout=int(os.environ.get("HTTP_TIMEOUT", "120"))):   # 网络卡住时 2 分钟就放弃重试，不要干等
     req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, method="POST" if body is not None else "GET",
                                  headers={"Content-Type": "application/json", **(headers or {})})
@@ -17,6 +27,67 @@ def http(url, body=None, headers=None, timeout=int(os.environ.get("HTTP_TIMEOUT"
         try: return e.code, json.loads(t)
         except Exception: return e.code, {"raw": t[:400]}
     except Exception as e: return 0, {"raw": str(e)[:300]}
+
+# ---------- 出图记录 state.json：几个任务同时跑时不能整份覆盖（2026-11-01） ----------
+import contextlib
+@contextlib.contextmanager
+def file_lock(path, timeout=90):
+    """跨进程的简单文件锁（path.lock）。上次异常退出留下的锁超过 2 分钟自动清掉；等太久就不等了，不卡死。"""
+    lk = path + ".lock"; t0 = time.time(); got = False
+    while True:
+        try: os.close(os.open(lk, os.O_CREAT | os.O_EXCL | os.O_WRONLY)); got = True; break
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(lk) > 120: os.remove(lk); continue
+            except OSError: pass
+            if time.time() - t0 > timeout: break
+            time.sleep(0.2)
+    try: yield
+    finally:
+        if got:
+            try: os.remove(lk)
+            except OSError: pass
+
+def _write_json(p, data):
+    tmp = p + f".{os.getpid()}.tmp"; json.dump(data, open(tmp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    for k in range(20):
+        try: os.replace(tmp, p); return
+        except PermissionError: time.sleep(0.1)     # Windows 上别的程序正在读，稍等
+    json.dump(data, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    try: os.remove(tmp)
+    except OSError: pass
+
+def save_state_merge(sp, state, sids, spent_delta=0.0):
+    """读最新的 state.json，只换成自己处理过的镜头（sids），花费按增量加；返回合并后的完整记录。"""
+    with file_lock(sp):
+        try: cur = json.load(open(sp, encoding="utf-8"))
+        except Exception: cur = {"spent": 0, "shots": {}}
+        cur.setdefault("shots", {})
+        for s in sids:
+            if s in state.get("shots", {}): cur["shots"][s] = state["shots"][s]
+        cur["spent"] = round(cur.get("spent", 0) + spent_delta, 4)
+        _write_json(sp, cur)
+    return cur
+
+def add_spent(sp, usd):
+    with file_lock(sp):
+        try: cur = json.load(open(sp, encoding="utf-8"))
+        except Exception: return
+        cur["spent"] = round(cur.get("spent", 0) + usd, 4); _write_json(sp, cur)
+
+def json_reply(js):
+    """从 Gemini 的返回里取出 JSON：拼起所有非「思考」的文字段，去掉 ```json 包裹；返回的是列表就取第一个对象。取不到返回 None。"""
+    try: parts = js["candidates"][0]["content"]["parts"]
+    except Exception: return None
+    t = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
+    if t.startswith("```"): t = t.split("\n", 1)[1] if "\n" in t else t[3:]; t = t.rsplit("```", 1)[0]
+    for cand in (t, t[t.find("{"):t.rfind("}") + 1] if "{" in t else ""):
+        try:
+            v = json.loads(cand)
+            if isinstance(v, list): v = next((x for x in v if isinstance(x, dict)), None)
+            if isinstance(v, dict): return v
+        except Exception: pass
+    return None
 
 def b64(p): return base64.b64encode(open(p, "rb").read()).decode()
 def mime(p): return "image/png" if p.lower().endswith(".png") else "image/jpeg"

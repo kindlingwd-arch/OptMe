@@ -72,8 +72,7 @@ def gen(rid):
                         from PIL import Image
                         Image.open(BytesIO(base64.b64decode(d["data"]))).save(out, "PNG")
                         try:
-                            sp = os.path.join(HERE, "out", "batch", "state.json"); s = json.load(open(sp, encoding="utf-8"))
-                            s["spent"] = s.get("spent", 0) + 0.14; json.dump(s, open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+                            gi.add_spent(os.path.join(HERE, "out", "batch", "state.json"), 0.14)
                         except Exception: pass
                         print("RESULT:refs/" + rid + ".png", flush=True); return 0
             print("ERROR:AI 没返回图片：" + json.dumps(js, ensure_ascii=False)[:200]); return 1

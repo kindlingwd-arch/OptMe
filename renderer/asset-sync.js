@@ -27,11 +27,19 @@ async function refreshReviewAssets(){
   try{return await promise;}finally{if(reviewAssetJob===job)reviewAssetJob=null;}
 }
 const lineMuted=(nid,i)=>!!P.N[nid]?.lines[i]?.[2]?.mute;
+// 游戏的 index.html 不认静音时（P.muteSupport 由 core.js 检测），提醒一次，避免「剪辑台里静音了、游戏里还在响」
+const muteWarned=new Set();
+function warnMuteUnsupported(kind){
+  const s=P&&P.muteSupport;if(!s||s[kind]||muteWarned.has(kind))return;muteWarned.add(kind);
+  toast(kind==='line'?'这个游戏的 index.html 不认台词静音，游戏里仍会播这句配音。请更新游戏文件。':'这个游戏的 index.html 不认视频原声静音，游戏里仍会播原声。请更新游戏文件。',true);
+}
 function setLineMuted(nid,i,value){
   const line=P.N[nid]?.lines[i];if(!line)return;
   line[2]={...(line[2]||{})};if(value)line[2].mute=true;else delete line[2].mute;
+  if(value)warnMuteUnsupported('line');
 }
 function setOriginalMuted(rel,value){
+  if(value)warnMuteUnsupported('original');
   if(value)(P.VAUD[rel] ||= {}).muted=true;
   else if(P.VAUD[rel]){
     delete P.VAUD[rel].muted;

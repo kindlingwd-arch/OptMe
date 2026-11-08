@@ -124,8 +124,12 @@ function setDirty(v) { dirty = v; $("tbSave").disabled = !v; $("dirtyDot").hidde
 async function save() {
   try {
     if (!P.hasLimg && limgList().length) toast("提示：这个游戏的 index.html 还不支持逐句分镜图，请先更新游戏文件", true);
-    const bk = await S.save(P.dir, { N: P.N, VOT: P.VOT, CLUES: P.CLUES, BGM: P.BGM, AMB: P.AMB, SHOTS: P.SHOTS, TRIM: P.TRIM, VAUD: P.VAUD, LIMG: P.hasLimg ? limgList() : undefined, STALE: [...stale] });
-    bust=Date.now();setDirty(false); toast("已保存" + (bk ? "（旧版本备份在 " + bk + "）" : "")); reloadPreview(); return true;
+    const r = await S.save(P.dir, { N: P.N, VOT: P.VOT, CLUES: P.CLUES, BGM: P.BGM, AMB: P.AMB, SHOTS: P.SHOTS, TRIM: P.TRIM, VAUD: P.VAUD, LIMG: P.hasLimg ? limgList() : undefined, STALE: [...stale] });
+    const bk = r && typeof r === "object" ? r.backup : r;
+    if (r && r.muteSupport) P.muteSupport = r.muteSupport;
+    bust=Date.now();setDirty(false); toast("已保存" + (bk ? "（旧版本备份在 " + bk + "）" : "")); reloadPreview();
+    if (r && r.warnings && r.warnings.length) toast("提示：" + r.warnings.join(" "), true);
+    return true;
   } catch (e) { toast("保存失败：" + e.message, true); return false; }
 }
 
@@ -1771,7 +1775,7 @@ function pickEngine(s) {
     document.body.appendChild(m);
     const note = () => { const e = m.querySelector('input[name="eng"]:checked').value, more = m.querySelector("#engMore").checked, c = engineCost(e, engineDur(e, s));
       m.querySelectorAll(".eng").forEach(x => x.classList.toggle("on", x.querySelector("input").checked));
-      m.querySelector("#engNote").textContent = more ? `只生成一次，约 ¥${c}；生成后 AI 质检打分，结果在「④ 成片」。` : `质检不通过会用 AI 改写的提示词自动重拍，最多再拍 2 次（最多约 ¥${+(c * 3).toFixed(2)}）；通过就自动换进游戏。需要 MINIMAX_API_KEY 和 GEMINI_API_KEY，每条几分钟。`; };
+      m.querySelector("#engNote").textContent = more ? `只生成一次，约 ¥${c}；生成后 AI 质检打分，结果在「④ 成片」。` : `质检不通过会用 AI 改写的提示词自动重拍，最多再拍 1 次（最多约 ¥${+(c * 2).toFixed(2)}）；通过就自动换进游戏。需要 MINIMAX_API_KEY 和 GEMINI_API_KEY，每条几分钟。`; };
     m.querySelectorAll("input").forEach(x => x.onchange = note); note();
     const done = v => { m.remove(); res(v); };
     m.querySelector("#engC").onclick = () => done(null); m.onclick = e => { if (e.target === m) done(null); };
@@ -1814,7 +1818,7 @@ function vCard(it, k) {
         <label class="vauto"><input type="checkbox" data-vf="novideo" ${s.novideo ? "checked" : ""}> 不做视频（游戏里只用定格图；勾上后不算待审）</label>
       </div>
       <div class="rvact vdraftbar"><span class="dim">草稿：</span><button class="ghost" data-a="vdcode" title="免费，几秒：首帧 + 按提示词做镜头运动 + 动作提示条 + 有尾帧就淡入 + 有手绘轨迹就画出来；台词页带配音。预览选「草稿」在游戏里看">🎞 出草稿（免费）</button><button class="ghost" data-a="vdend" title="让 Gemini 按提示词画这段视频最后一刻的样子（约 $0.14），画完自动重出代码草稿（后半段淡入尾帧）">🖼 AI 画尾帧</button>${dr.end && s.last !== dr.end.file ? '<button class="ghost" data-a="vduse" title="正式生成时把这张当尾帧（首尾帧模式），动作的终点会锁得更准">用作正式尾帧</button>' : ""}${dr.end && s.last === dr.end.file ? '<button class="ghost" data-a="vdunuse" title="正式生成时不用尾帧">不用尾帧</button>' : ""}<button class="ghost" data-a="vd25" title="2.5D 预演（免费，要装 Blender）：首帧估深度变成立体场景，人 / 车抠成卡片在地上走，镜头、光照、颜色、雪按参数来；有手绘动作就加灰模手臂。参数在 motion_ref\\scenes\\${esc(s.id)}.json（第一次自动生成）">🧊 2.5D 预演</button><button class="ghost" data-a="vd25e" title="打开这条的 2.5D 参数文件（镜头运动、光照颜色、雪、要抠出来走动的人 / 车），改完再点「2.5D 预演」">参数</button><button class="ghost" data-a="vdlocal" title="用电脑上的开源视频模型（LTX-Video）出会动的草稿，不花 API 钱；要 NVIDIA 显卡，第一次要装 install_local_video.bat">🖥 本地模型草稿</button>${dstale ? '<span class="tag best" title="草稿是按旧提示词出的">提示词改过，草稿要重出</span>' : ""}</div>
-      <div class="rvact"><button class="ghost" data-a="vsketch" title="在首帧上用鼠标录动作路线（按住拖动，边拖边计时），AI 整理后用代码生成参考视频">✎ 手绘动作</button><button class="ghost" data-a="vwrite" title="让 Gemini 看这张首帧图和剧本，重写这一条的视频提示词和质检标准（约 $0.01）；原来的存进 prompt_prev">✎ AI 重写</button><button class="pri" data-a="vok">✓ 视频提示词没问题<kbd>A</kbd></button><button class="ghost" data-a="vgen" title="交给视频模型生成，质检不通过会自动用 AI 改写的提示词重拍（最多 2 次）">▶ 生成视频（选模型）<kbd>R</kbd></button>${P.N[s.id] ? '<button class="ghost" data-a="goto">去故事板</button>' : ""}</div>
+      <div class="rvact"><button class="ghost" data-a="vsketch" title="在首帧上用鼠标录动作路线（按住拖动，边拖边计时），AI 整理后用代码生成参考视频">✎ 手绘动作</button><button class="ghost" data-a="vwrite" title="让 Gemini 看这张首帧图和剧本，重写这一条的视频提示词和质检标准（约 $0.01）；原来的存进 prompt_prev">✎ AI 重写</button><button class="pri" data-a="vok">✓ 视频提示词没问题<kbd>A</kbd></button><button class="ghost" data-a="vgen" title="交给视频模型生成，质检不通过会自动用 AI 改写的提示词重拍（最多再拍 1 次）">▶ 生成视频（选模型）<kbd>R</kbd></button>${P.N[s.id] ? '<button class="ghost" data-a="goto">去故事板</button>' : ""}</div>
     </div></article>`;
 }
 function bindVCard(card, k) {

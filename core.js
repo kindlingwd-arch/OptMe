@@ -101,7 +101,7 @@ function loadProject(dir) {
   const tm = s.match(/<title>([^<]*)<\/title>/) || s.match(/<h1>([^<]*)<\/h1>/);
   let STALE = [];
   try { STALE = JSON.parse(fs.readFileSync(path.join(dir, STUDIO_DIR, "state.json"), "utf8")).stale || []; } catch {}
-  return { dir, name: tm ? tm[1].trim() : path.basename(dir), N, VOT, SHOTS, LIMG, hasLimg: s.includes("const LIMG=new Set(/*LIMG*/"), sb: sbLoad(dir), refs: refsLoad(dir), voiceRefs: require("./voice-refs-store").load(dir), vs: vsLoad(dir), TRIM, VAUD, hasClip: s.includes("const TRIM=/*TRIM*/"), BGM, AMB, SHOT_SFX, CLUES, ACTS, STALE, files: listFiles(dir) };
+  return { dir, name: tm ? tm[1].trim() : path.basename(dir), N, VOT, SHOTS, LIMG, hasLimg: s.includes("const LIMG=new Set(/*LIMG*/"), muteSupport: muteSupport(upgradeMute(s)), sb: sbLoad(dir), refs: refsLoad(dir), voiceRefs: require("./voice-refs-store").load(dir), vs: vsLoad(dir), TRIM, VAUD, hasClip: s.includes("const TRIM=/*TRIM*/"), BGM, AMB, SHOT_SFX, CLUES, ACTS, STALE, files: listFiles(dir) };
 }
 
 /* ---- 参考图登记表（moban_art\refs\refs.json）：名称、类型、生成描述、关键词（提示词里出现这些词时应该附上它） ---- */
@@ -260,6 +260,29 @@ function backup(dir, abs) {
   return path.relative(dir, dst).split(path.sep).join("/");
 }
 
+/* ---- 静音支持：游戏代码要认 VAUD[...].muted（视频原声静音）和台词第三项的 mute（这句配音静音） ----
+   新的游戏模板自带这两处；旧模板在保存时只在原来那两个确切位置升级一次，不再全文替换。
+   升级不了（游戏代码改过写法）就返回警告，而不是静默失效。 */
+const MUTE_UPGRADES = {
+  original: [["va.volume=Math.min(1,a.vol??1)", "va.volume=a.muted?0:Math.min(1,a.vol??1)"]],
+  line: [['.mp3";a.volume=1;', '.mp3";a.volume=(N[G.node]?.lines[G.line]?.[2]?.mute)?0:1;'],
+         [".mp3';a.volume=1;", ".mp3';a.volume=(N[G.node]?.lines[G.line]?.[2]?.mute)?0:1;"]],
+};
+function muteSupport(s) {
+  return { original: /\.muted\s*\?\s*0\s*:/.test(s), line: /\[2\]\s*\?\.\s*mute\b/.test(s) };
+}
+function upgradeMute(s) {
+  const has = muteSupport(s);
+  for (const [kind, pairs] of Object.entries(MUTE_UPGRADES)) if (!has[kind])
+    for (const [from, to] of pairs) if (s.includes(from)) s = s.split(from).join(to);
+  return s;
+}
+function muteUsed(data) {
+  const line = Object.values(data.N || {}).some(n => (n.lines || []).some(l => l && l[2] && l[2].mute));
+  const original = Object.values(data.VAUD || {}).some(v => v && v.muted);
+  return { line, original };
+}
+
 function saveProject(dir, data) {
   let s = fs.readFileSync(gameFile(dir), "utf8"); const bk = backup(dir, gameFile(dir));
   const put = (sp, txt) => { s = s.slice(0, sp[0]) + txt + s.slice(sp[1]); };
@@ -274,11 +297,13 @@ function saveProject(dir, data) {
   }
   for (const k of ["BGM", "AMB"]) if (data[k]) { const sp = spanLine(s, `const ${k}=`); if (sp) put(sp, toJsObj(data[k])); }
   if (data.CLUES) put(spanClues(s), "{\n" + Object.entries(data.CLUES).map(([k, v]) => ` ${k}:${JSON.stringify(v)}`).join(",\n") + "\n}");
-  s = s.replace('va.volume=Math.min(1,a.vol??1)', 'va.volume=a.muted?0:Math.min(1,a.vol??1)')
-    .replaceAll('a.volume=1;', 'a.volume=(N[G.node]?.lines[G.line]?.[2]?.mute)?0:1;');
+  s = upgradeMute(s);
   fs.writeFileSync(gameFile(dir), s, "utf8");
   if (data.STALE) { fs.mkdirSync(path.join(dir, STUDIO_DIR), { recursive: true }); fs.writeFileSync(path.join(dir, STUDIO_DIR, "state.json"), JSON.stringify({ stale: data.STALE })); }
-  return bk;
+  const has = muteSupport(s), used = muteUsed(data), warnings = [];
+  if (used.line && !has.line) warnings.push("有台词设了静音，但这个游戏的 index.html 不认台词静音（找不到 lines[...][2]?.mute），游戏里仍会播配音。请更新游戏文件。");
+  if (used.original && !has.original) warnings.push("有视频原声设了静音，但这个游戏的 index.html 不认 VAUD 的 muted，游戏里仍会播原声。请更新游戏文件。");
+  return { backup: bk, muteSupport: has, warnings };
 }
 
 function safeTarget(dir, rel) {
@@ -352,4 +377,4 @@ function exportGame(dir, name) {
   writeZip(out, entries); return out;
 }
 
-module.exports = { MEDIA_DIRS, STUDIO_DIR, isProject, loadProject, saveProject, replaceAsset, writeAsset, readAsset, importFiles, exportGame, listFiles, sbDir, sbLoad, sbSaveShot, sbReview, sbReviewMany, sketchWrite, sketchRead, vsLoad, vsSave, vsAdd, vsDel, refPath, refsLoad, refsSave, refsImport };
+module.exports = { MEDIA_DIRS, STUDIO_DIR, muteSupport, upgradeMute, isProject, loadProject, saveProject, replaceAsset, writeAsset, readAsset, importFiles, exportGame, listFiles, sbDir, sbLoad, sbSaveShot, sbReview, sbReviewMany, sketchWrite, sketchRead, vsLoad, vsSave, vsAdd, vsDel, refPath, refsLoad, refsSave, refsImport };
