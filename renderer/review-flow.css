@@ -1,0 +1,2 @@
+.review-flow{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.review-flow>button{flex:1;white-space:nowrap}

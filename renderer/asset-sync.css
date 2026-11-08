@@ -1,0 +1,5 @@
+.blk.is-muted,.fe-blk.is-muted{opacity:.45;filter:grayscale(.7)}
+.dlg-video-link{display:flex;gap:10px;align-items:center;margin-top:8px;font-size:12px}
+.dlg-video-link>img{width:96px;height:54px;object-fit:cover;border-radius:5px}
+.dlg-video-link button{margin-top:5px}
+.dlg-muted{color:var(--dim);font-size:12px}

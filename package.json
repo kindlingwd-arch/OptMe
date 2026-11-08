@@ -1,41 +1,10 @@
 {
-  "name": "yingyou-studio",
-  "productName": "影游剪辑台",
-  "version": "0.5.0",
-  "description": "用剪辑软件的方式做互动影游：剧本即剪辑表，素材可替换，一键导出游戏包；内置参考图 / 提示词 / 图片三道审阅和框选修图",
-  "main": "main.js",
-  "author": "kindlingwd",
-  "license": "MIT",
-  "private": true,
-  "scripts": {
-    "start": "electron .",
-    "dist:win": "electron-builder --win zip --x64",
-    "dist:dir": "electron-builder --win dir --x64"
-  },
-  "devDependencies": {
-    "electron": "38.8.6",
-    "electron-builder": "26.18.1"
-  },
-  "build": {
-    "appId": "com.kindlingwd.yingyou-studio",
-    "productName": "影游剪辑台",
-    "artifactName": "YingyouStudio-${version}-win-x64.${ext}",
-    "files": [
-      "main.js",
-      "preload.js",
-      "core.js",
-      "renderer/**/*",
-      "package.json"
-    ],
-    "directories": {
-      "output": "dist"
-    },
-    "win": {
-      "target": [
-        "zip"
-      ],
-      "executableName": "YingyouStudio",
-      "signAndEditExecutable": false
-    }
-  }
+ "name": "yingyou-studio",
+ "productName": "影游剪辑台",
+ "version": "0.4.0",
+ "description": "用剪辑软件的方式做互动影游：剧本即剪辑表，素材可替换，一键导出游戏包",
+ "main": "main.js",
+ "author": "kindlingwd",
+ "license": "UNLICENSED",
+ "private": true
 }

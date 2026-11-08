@@ -5,6 +5,13 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' file: data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src file: data: blob:; img-src file: data: blob:; frame-src file:">
 <title>影游剪辑台</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="dialogue.css">
+<link rel="stylesheet" href="voice-refs.css">
+<link rel="stylesheet" href="audio-library.css">
+<link rel="stylesheet" href="script-video.css">
+<link rel="stylesheet" href="linked-edit.css">
+<link rel="stylesheet" href="review-flow.css">
+<link rel="stylesheet" href="asset-sync.css">
 </head>
 <body>
 
@@ -61,6 +68,7 @@
           <button class="icon" id="pNextLine" title="下一句">⏭</button>
         </div>
         <label class="chk"><input type="checkbox" id="allClues" checked> 带上之前能拿到的线索</label>
+        <select id="pvMode" title="图片：不播视频，只放分镜图，一张张过剧情；草稿：视频都换成草稿视频（审阅 → 视频 里「出草稿」生成，免费），没有草稿的定格；视频：正式视频"><option value="video">视频</option><option value="draft">草稿</option><option value="still">图片</option></select>
       </div>
     </section>
 
@@ -98,9 +106,18 @@
 
 <div id="taskbar" class="taskbar" hidden>
   <div class="tk-h"><span class="spin" id="taskSpin"></span><b id="taskTitle">出图任务</b><span class="grow"></span><button class="ghost" id="taskStop">停止</button><button class="icon" id="taskHide" title="收起">✕</button></div>
+  <div class="tk-tabs" id="taskTabs"></div>
   <pre id="taskLog"></pre>
 </div>
 <div id="toasts" class="toasts"></div>
 <script src="app.js"></script>
+<script src="dialogue.js"></script>
+<script src="local-video.js"></script>
+<script src="voice-refs.js"></script>
+<script src="audio-library.js"></script>
+<script src="script-video.js"></script>
+<script src="final-load.js"></script>
+<script src="review-flow.js"></script>
+<script src="asset-sync.js"></script>
 </body>
 </html>
