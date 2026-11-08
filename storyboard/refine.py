@@ -13,7 +13,7 @@ from io import BytesIO
 OUT = os.path.join(HERE, "out", "refine"); os.makedirs(OUT, exist_ok=True)
 os.makedirs(B.OUT, exist_ok=True)
 MAX_ROUNDS = int(os.environ.get("REFINE_ROUNDS", "4"))
-CHECKS = ["人物", "位置构图", "左舵", "长相服装", "道具", "年代", "文字水印", "肢体"]
+CHECKS = ["人物", "位置构图", "左舵", "长相服装", "道具", "年代", "文字水印", "肢体", "人和物的关系"]
 
 def jpeg_part(path, maxw=None):
     im = Image.open(path).convert("RGB")
@@ -34,11 +34,11 @@ def qc2(shot, bible, img):
     parts.append({"text": f"""你是电影分镜审核员。逐项严格检查最后这张分镜图，只输出 JSON。
 要求的构图（以画面方向为准）：{shot['layout']}
 画面内容：{shot['desc']}
-画面里只能有：{shot['in_frame']}
+画面里的主角：{shot['in_frame']}（按座位设定本来就在场、位置落在画面里的人——比如驾驶座上的司机——可以只露出手、肩膀或背影，不算多余；真正多出来的人才算）
 统一设定：{'；'.join(f'{k}：{v}' for k, v in bible.items())}
 {B.SKETCH_QC if shot.get("sketch") else ""}左舵的判断方法：从车前方隔着挡风玻璃看，司机和方向盘在画面右侧；从车内后座或车后方往前看，司机和方向盘在画面左侧；从车外看到驾驶座车窗时，车头朝画面左侧。
-逐项检查：人物（该出现的都在、没有多余的人或多余的手）、位置构图（人物左右位置、景别、机位和要求一致）、左舵、长相服装（和参考图一致：女人深色卷发貂皮大衣，大军狗皮帽军绿棉袄，司机棉帽围巾蓝棉袄）、道具（皮箱、BP机、信封、钱等对不对）、年代（1998 年东北，无现代物品，只能是第四套人民币）、文字水印（除保险单红色抬头外不能有字）、肢体（手指、肢体没有变形）。
-对每个问题判断修法：只是局部（多一只手、少条围巾、灯上有字、道具颜色不对、背景里多了东西）→ "edit"；人物左右颠倒、主体画错、景别机位完全不对 → "redraw"。
+逐项检查：人物（该出现的都在、没有多余的人或多余的手）、位置构图（人物左右位置、景别、机位和要求一致）、左舵、长相服装（和参考图一致：女人深色卷发貂皮大衣，大军狗皮帽军绿棉袄，司机棉帽围巾蓝棉袄）、道具（皮箱、BP机、信封、钱等对不对）、年代（1998 年东北，无现代物品，只能是第四套人民币）、文字水印（除保险单红色抬头外不能有字）、肢体（手指、肢体没有变形）、人和物的关系（{B.RELATION_QC}）。
+对每个问题判断修法：只是局部（多一只手、少条围巾、灯上有字、道具颜色不对、背景里多了东西、方向盘上缺司机的手）→ "edit"；人物左右颠倒、主体画错、景别机位完全不对 → "redraw"。
 输出：{{"checks": {{{', '.join(f'"{c}": {{"ok": true/false, "note": ""}}' for c in CHECKS)}}},
  "score": 0-10,
  "problems": [{{"what": "哪里不对", "kind": "edit 或 redraw", "instruction": "给图像模型的修改指令：祈使句，只说要改的地方，具体到位置"}}]}}"""})
@@ -47,7 +47,8 @@ def qc2(shot, bible, img):
         st, js = gi.http(f"{gi.G}/models/{B.QC_MODEL}:generateContent", body, {"x-goog-api-key": key})
         if st == 200:
             try:
-                q = json.loads(js["candidates"][0]["content"]["parts"][0]["text"])
+                q = gi.json_reply(js)
+                if q is None: raise ValueError("看不懂")
                 q["pass"] = all((q.get("checks", {}).get(c) or {}).get("ok", True) for c in CHECKS) and not any(p.get("kind") == "redraw" for p in q.get("problems", []))
                 return q
             except Exception: return {"error": "质检返回看不懂", "pass": False, "score": 0, "problems": []}
@@ -136,12 +137,14 @@ def main():
     manual = args[1] if len(args) == 2 and args[1] not in shots else None
     ids = [args[0]] if manual else (args or [k for k in shots if (state["shots"].get(k) or {}).get("status") in ("best", "todo", "budget", None)])
     print(f"要处理 {len(ids)} 个镜头" + (f"，人工意见：{manual}" if manual else ""), flush=True)
+    touched, base = set(), [state.get("spent", 0)]
     for sid in ids:
         if sid not in shots: print(sid, "不在分镜表里"); continue
-        r = refine(shots[sid], bible, state, manual, force)
-        json.dump(state, open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        r = refine(shots[sid], bible, state, manual, force); touched.add(sid)
+        gi.save_state_merge(sp, state, touched, state.get("spent", 0) - base[0]); base[0] = state.get("spent", 0)   # 只写自己处理的镜头
         if r == "quota": print("Gemini 额度用完，充值后再跑"); break
-    B.register([k for k, v in state["shots"].items() if v.get("status") in ("pass", "best", "reuse", "manual")])
+    cur = gi.save_state_merge(sp, state, touched, 0)
+    B.register([k for k, v in cur["shots"].items() if v.get("status") in ("pass", "best", "reuse", "manual")])
     print("完成。逐张记录在 out\\batch\\state.json 的 refine 字段；图片在 out\\refine\\")
 
 if __name__ == "__main__":

@@ -1,0 +1,21 @@
+# 剪辑台调用的 Python 工具（storyboard/ autofix/ qc/ motion_ref/ 和 voice_clone_worker.py）
+# 安装：pip install -r requirements.txt
+
+# 必需
+Pillow>=10
+numpy>=1.24
+imageio-ffmpeg>=0.4      # 视频 / 音频处理、读录音时长（没装 ffmpeg 时用它自带的）
+
+# 可选：框选修图独立网页版、gpt_svg.py 把 SVG 转 PNG
+cairosvg>=2.7
+
+# 可选：2.5D 预演（motion_ref/scene25d.py），另外要装 Blender；也可以直接运行 motion_ref/install_25d.bat
+# onnxruntime
+# opencv-python
+# huggingface_hub
+
+# 可选：本地视频模型草稿（draft_video.py --local），要 NVIDIA 显卡，运行 autofix/install_local_video.bat 安装
+# torch / diffusers / transformers / accelerate / sentencepiece / protobuf
+
+# 可选：motion_ref 里的其他参考视频方式
+# playwright（three_ref.py / three3d.py）、manim（manim_ref.py）

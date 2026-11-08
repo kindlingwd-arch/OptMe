@@ -26,10 +26,16 @@ v0.5 起内置了从参考图到成片的整套优化流程，v0.6 把它延伸�
 ├─ main.js / preload.js / core.js     Electron 主进程（文件读写、IPC、跑 Python 任务）
 ├─ voice-*.js / voice_clone_worker.py 声音参考登记和 MiniMax 声音复刻
 ├─ renderer/        界面（app.js 主体 + 按功能拆出的模块）
-├─ storyboard/      剪辑台调用的 Python 工具（出图、质检、修图、参考图生成）
+├─ storyboard/      图片工具：出图、质检、修图、参考图、衔接检查、手绘构图
+├─ autofix/         视频工具：视频提示词、时长、草稿、生成 + 质检 + 自动重拍、口型同步
+├─ qc/              视频 / 声音质检（autofix 调用）
+├─ motion_ref/      参考视频、2.5D 预演（autofix 调用）
+├─ requirements.txt Python 依赖
 ├─ docs/            设计与使用、架构与数据约定、制作流程
 └─ skills/yingyou-flow/   让 Claude / Codex 按同一套流程工作的 skill
 ```
+
+仓库里的 Python 工具只有脚本和说明，不含具体游戏的数据（分镜表、视频分镜表、生成记录）。
 
 ## 运行
 
@@ -46,15 +52,16 @@ npm run dist:win     # 打 Windows 包（dist/ 下的 zip，解压后双击 Ying
 ```
 <项目根目录>/
 ├─ <游戏文件夹>/        index.html、img/、vid/、vo/ ……（剪辑台的工作数据在 _studio/）
-├─ storyboard/         把本仓库的 storyboard/ 放这里，再加上 shotlist.json（分镜表 + 统一设定）
-├─ autofix/            视频工具和 video_shots.json（视频分镜表）——目前不在仓库里，见下
+├─ storyboard/         把本仓库的 storyboard/ 拷到这里，再加上 shotlist.json（分镜表 + 统一设定）
+├─ autofix/            把本仓库的 autofix/ 拷到这里，再加上 video_shots.json（视频分镜表）
+├─ qc/  motion_ref/    把本仓库的同名文件夹拷到这里
 └─ refs/               参考图 + refs.json 登记表；声音参考 voice_refs.json + voices/
 ```
 
 Python 工具（AI 出图、修图、参考图生成、视频、声音复刻）：
 
 ```bash
-pip install -r storyboard/requirements.txt
+pip install -r requirements.txt
 ```
 
 - 环境变量：
@@ -62,8 +69,8 @@ pip install -r storyboard/requirements.txt
   - `MINIMAX_API_KEY`：视频生成、声音复刻、试听和台词配音。
   - 可选：`YINGYOU_PYTHON`（指定 python.exe）、`AUTOFIX_BUDGET`（视频生成预算，元，默认 20）。
 - 剪辑台按顺序找 Python：环境变量 `YINGYOU_PYTHON` → `%USERPROFILE%\anaconda3\python.exe` → `python`。
-- 也可以单独双击 `storyboard/run_*.bat`；`run_fix_box.bat` 是框选修图的独立网页版。
-- **目前缺的脚本**：衔接检查（`continuity.py`）、手绘构图（`sketch_ai.py`）和整个 `autofix/`（③ 草稿、④ 成片用的视频脚本）还没放进仓库，从仓库安装时这些功能会报「没找到 …」。详见架构文档。
+- 也可以单独双击各文件夹里的 `run_*.bat`；`storyboard/run_fix_box.bat` 是框选修图的独立网页版。
+- 每个脚本做什么、花多少钱，见架构文档的「Python 工具」。
 
 ## 文档
 
